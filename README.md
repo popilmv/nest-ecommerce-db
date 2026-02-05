@@ -15,3 +15,52 @@ Implement safe `createOrder` for an e-commerce backend:
 - QueryRunner transactions
 - Pessimistic locking (row-level)
 
+```
+npm i @nestjs/typeorm typeorm pg
+npm i @nestjs/config
+```
+
+I use local PosgreSQL so create new DB:
+```
+CREATE DATABASE ecommerce_db_hw;
+```
+## RUN API
+```
+npm run start:dev
+```
+
+## Seed demo data
+```
+npm run seed
+```
+<img width="474" height="195" alt="image" src="https://github.com/user-attachments/assets/4226256d-5336-435e-b655-6281d398211b" />
+
+## Transactional createOrder
+```
+curl -i \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: test-key-1" \
+  -d "{
+    \"userId\":\"e74c8128-ec97-40ab-bc1c-7f420d541a2c\",
+    \"items\":[{\"productId\":\"b6106263-a610-4dc8-9be6-74f42a87ed4d\",\"quantity\":1}]
+  }" \
+  http://localhost:3000/orders
+```
+
+<img width="1601" height="486" alt="image" src="https://github.com/user-attachments/assets/443d82bc-e9fb-44bb-b6ee-8feebb094ba1" />
+
+
+## No partial writes
+
+Trigger a business error:
+
+
+
+
+<img width="407" height="108" alt="image" src="https://github.com/user-attachments/assets/64faea3b-7738-44aa-b0ce-496b4af3af53" />
+
+
+<img width="1645" height="276" alt="image" src="https://github.com/user-attachments/assets/06b74071-4346-4768-9208-d90807d3e212" />
+
+
+
