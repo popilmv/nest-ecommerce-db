@@ -63,4 +63,23 @@ Trigger a business error:
 <img width="1645" height="276" alt="image" src="https://github.com/user-attachments/assets/06b74071-4346-4768-9208-d90807d3e212" />
 
 
+## Before / After
+```
+EXPLAIN ANALYZE
+SELECT id, "userId", status, "createdAt"
+FROM orders
+WHERE status = 'created'
+  AND "createdAt" >= NOW() - interval '7 days'
+ORDER BY "createdAt" DESC
+LIMIT 50;
+```
+<img width="843" height="316" alt="image" src="https://github.com/user-attachments/assets/65583344-c878-4493-ac43-9c032712fcae" />
+
+
+```
+CREATE INDEX idx_orders_status_created_at
+ON orders (status, "createdAt" DESC);
+```
+
+<img width="779" height="328" alt="image" src="https://github.com/user-attachments/assets/82a7688b-ce88-4a90-89ce-28e6377f8cc9" />
 
