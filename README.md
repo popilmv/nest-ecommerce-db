@@ -64,8 +64,11 @@ Trigger a business error:
 
 
 ## Before / After
+
+SQL Optimization (Orders by status and date)
+Hot query
+
 ```
-EXPLAIN ANALYZE
 SELECT id, "userId", status, "createdAt"
 FROM orders
 WHERE status = 'created'
@@ -73,13 +76,35 @@ WHERE status = 'created'
 ORDER BY "createdAt" DESC
 LIMIT 50;
 ```
-<img width="843" height="316" alt="image" src="https://github.com/user-attachments/assets/65583344-c878-4493-ac43-9c032712fcae" />
+This query is used to fetch the latest created orders for admin views with filtering by status and creation date.
 
+Before optimization (no index)
+Execution plan highlights:
+PostgreSQL performed a Seq Scan on the orders table.
+Most rows were filtered out by status and createdAt conditions.
+An additional Sort (top-N heapsort) step was required for ORDER BY createdAt DESC.
+Execution time was around 10–12 ms with a large number of rows removed by filter.
+This approach does not scale well as the table grows.
+
+*Optimization*
+
+A partial index was added to match the query pattern:
 
 ```
-CREATE INDEX idx_orders_status_created_at
-ON orders (status, "createdAt" DESC);
+CREATE INDEX idx_orders_created_createdat_desc
+ON orders ("createdAt" DESC)
+WHERE status = 'created';
 ```
 
-<img width="779" height="328" alt="image" src="https://github.com/user-attachments/assets/82a7688b-ce88-4a90-89ce-28e6377f8cc9" />
+After optimization
+Execution plan highlights:
+PostgreSQL switched to an Index Scan using idx_orders_created_createdat_desc.
+Rows are returned already ordered, so no additional sort step is needed.
+Significantly fewer pages are read (Buffers: shared hit=50 read=2).
+Execution time dropped to approximately 0.33 ms.
 
+## Conclusion
+
+Before optimization, PostgreSQL scanned the entire orders table, filtered out most rows, and performed an extra sort operation.
+After introducing a partial index aligned with the WHERE and ORDER BY clauses, the planner was able to use an index scan and avoid sorting altogether.
+This reduced query execution time by more than an order of magnitude and significantly improved scalability.
