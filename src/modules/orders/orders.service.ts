@@ -6,9 +6,52 @@ import { OrderItem } from './order-item.entity';
 import { Product } from '../products/product.entity';
 import { BadRequestError, ConflictError, NotFoundError } from '../../common/errors/http-exception';
 
+type FindOrdersArgs = {
+  filter?: {
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  };
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  };
+};
+
 @Injectable()
 export class OrdersService {
   constructor(private readonly dataSource: DataSource) {}
+
+  /**
+   * Returns orders with items. Product for each item is resolved in GraphQL via DataLoader.
+   * NOTE: this method is used by GraphQL resolver to keep resolver thin.
+   */
+  async findOrders(args: FindOrdersArgs): Promise<Order[]> {
+    const limit = Math.min(Math.max(args.pagination?.limit ?? 20, 1), 100);
+    const offset = Math.max(args.pagination?.offset ?? 0, 0);
+
+    const qb = this.dataSource
+      .getRepository(Order)
+      .createQueryBuilder('o')
+      .leftJoinAndSelect('o.items', 'i')
+      .orderBy('o.createdAt', 'DESC')
+      .take(limit)
+      .skip(offset);
+
+    if (args.filter?.status) {
+      qb.andWhere('o.status = :status', { status: args.filter.status });
+    }
+
+    if (args.filter?.dateFrom) {
+      qb.andWhere('o.createdAt >= :dateFrom', { dateFrom: new Date(args.filter.dateFrom) });
+    }
+
+    if (args.filter?.dateTo) {
+      qb.andWhere('o.createdAt <= :dateTo', { dateTo: new Date(args.filter.dateTo) });
+    }
+
+    return qb.getMany();
+  }
 
   async createOrder(dto: CreateOrderDto, idempotencyKey: string) {
     if (!idempotencyKey) throw new BadRequestError('Idempotency-Key header is required');

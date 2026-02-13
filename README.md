@@ -28,6 +28,11 @@ CREATE DATABASE ecommerce_db_hw;
 ```
 npm run start:dev
 ```
+## GraphQL
+
+GraphQL endpoint: `http://localhost:3000/graphql`
+
+Homework notes (schema/resolvers/dataloader + N+1 proof): see **homework07.md**.
 
 ## Seed demo data
 ```
