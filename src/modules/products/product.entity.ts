@@ -13,5 +13,9 @@ export class Product {
 
   @Column({ type: 'int' })
   stock: number;
+
+  // FileRecord.id (nullable) - points to uploaded product image
+  @Column({ type: 'uuid', nullable: true })
+  imageFileId?: string | null;
 }
 
