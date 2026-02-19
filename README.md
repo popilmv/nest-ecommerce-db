@@ -113,3 +113,45 @@ Execution time dropped to approximately 0.33 ms.
 Before optimization, PostgreSQL scanned the entire orders table, filtered out most rows, and performed an extra sort operation.
 After introducing a partial index aligned with the WHERE and ORDER BY clauses, the planner was able to use an index scan and avoid sorting altogether.
 This reduced query execution time by more than an order of magnitude and significantly improved scalability.
+
+
+---
+
+## Files (S3) homework: presigned upload flow
+
+### Env
+Copy `.env.example` -> `.env` and set:
+- `AWS_REGION`
+- `S3_BUCKET` (already set to `nodejs-homework-27`)
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (local dev only)
+
+### API
+**DEV auth** is enabled for this homework (replace with JWT guard in production).
+Send headers:
+- `x-user-id: <uuid>`
+- `x-user-role: admin` (required for product image upload)
+
+Endpoints:
+- `POST /files/presign`
+- `PUT <uploadUrl>` (direct to S3)
+- `POST /files/complete`
+- `GET /files/:id` (returns view URL; public -> CloudFront/S3 URL, private -> presigned GET)
+
+### Example curl
+```bash
+# 1) presign
+curl -X POST http://localhost:3000/files/presign \
+  -H 'Content-Type: application/json' \
+  -H 'x-user-id: 00000000-0000-0000-0000-000000000001' \
+  -H 'x-user-role: admin' \
+  -d '{"entityType":"product","entityId":"<PRODUCT_ID>","contentType":"image/png","size":12345,"visibility":"public"}'
+
+# 2) upload to S3
+curl -X PUT '<uploadUrl>' -H 'Content-Type: image/png' --data-binary @./local.png
+
+# 3) complete
+curl -X POST http://localhost:3000/files/complete \
+  -H 'Content-Type: application/json' \
+  -H 'x-user-id: 00000000-0000-0000-0000-000000000001' \
+  -d '{"fileId":"<FILE_ID>"}'
+```
