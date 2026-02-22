@@ -155,3 +155,104 @@ curl -X POST http://localhost:3000/files/complete \
   -H 'x-user-id: 00000000-0000-0000-0000-000000000001' \
   -d '{"fileId":"<FILE_ID>"}'
 ```
+---
+
+## Docker
+
+This repo supports:
+
+- **prod-like** local run (API + Postgres) via `compose.yml`
+- **dev** run with hot reload & bind-mount via `compose.dev.yml`
+- multi-stage **Dockerfile targets**: `dev`, `build`, `prod`, `prod-distroless`
+- DB jobs as **one-off containers**: `migrate` and `seed`
+
+### Files added
+
+- `Dockerfile` — multi-stage build (dev/build/prod/prod-distroless)
+- `compose.yml` — prod-like stack (API + Postgres + jobs)
+- `compose.dev.yml` — dev override (hot reload + bind mount)
+- `.dockerignore` — excludes `node_modules`, `dist`, `.git`, `.env`, logs, etc.
+- `.env.example` — example env (no secrets)
+
+### 1) Setup env
+
+Create your local `.env` from `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+> `.env` must **not** be committed. It is ignored by `.dockerignore` and should be in `.gitignore`.
+
+### 2) Dev (hot reload)
+
+```bash
+docker-compose -f compose.yml -f compose.dev.yml up --build
+```
+
+- API: http://localhost:8080
+- Postgres: **not exposed** (no `ports:`), only available on the internal network.
+
+### 3) Prod-like local run
+
+```bash
+docker-compose -f compose.yml up --build
+```
+
+### 4) Run DB jobs (one-off containers)
+
+Migrate (schema sync in this project):
+
+```bash
+docker-compose -f compose.yml --profile jobs run --rm migrate
+```
+
+Seed:
+
+```bash
+docker-compose -f compose.yml --profile jobs run --rm seed
+```
+
+### 5) Distroless proof (must start)
+
+Run distroless API variant (on **8081**):
+
+```bash
+docker-compose -f compose.yml --profile distroless up --build api-distroless
+```
+
+### 6) Image size & history (proof of optimization)
+
+Build targets:
+
+```bash
+docker build --target dev -t ecommerce-api:dev .
+docker build --target prod -t ecommerce-api:prod .
+docker build --target prod-distroless -t ecommerce-api:prod-distroless .
+```
+
+Compare sizes:
+
+```bash
+docker image ls | grep ecommerce-api
+```
+
+Show layer history:
+
+```bash
+docker history ecommerce-api:prod
+docker history ecommerce-api:prod-distroless
+```
+
+**Expected outcome:** `prod-distroless` is smaller and has fewer tools (no shell/package manager), so the attack surface is lower.
+
+### 7) Non-root proof
+
+Prod (alpine) container runs as `node` user:
+
+```bash
+docker-compose exec api id
+```
+
+Distroless has no shell; non-root is guaranteed by the base image defaults.
+(If you need a hard proof, run the `prod` target for `id` and document that `prod-distroless` uses a nonroot distroless base.)

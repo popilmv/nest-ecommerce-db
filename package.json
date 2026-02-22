@@ -9,7 +9,8 @@
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/database/data-source.ts src/migrations/Init",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts",
-    "seed": "ts-node src/seeds/seed.ts",
+    "migrate": "node dist/database/migrate.js",
+    "seed": "node dist/seeds/seed.js",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -43,15 +44,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "typeorm": "^0.3.28",
-<<<<<<< HEAD
-    "zod": "^4.3.6",
-    "@aws-sdk/client-s3": "^3.700.0",
-    "@aws-sdk/s3-request-presigner": "^3.700.0",
-    "uuid": "^10.0.0"
-=======
-    "uuid": "^13.0.0",
     "zod": "^4.3.6"
->>>>>>> 5e1d3807abe7104492ce8662ab27b80bd8c1cdeb
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -78,8 +71,7 @@
     "tsconfig-paths": "^4.2.0",
     "typeorm-ts-node-commonjs": "^0.3.20",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.20.0",
-    "@types/uuid": "^10.0.0"
+    "typescript-eslint": "^8.20.0"
   },
   "jest": {
     "moduleFileExtensions": [

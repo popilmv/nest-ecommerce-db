@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-app}
+      POSTGRES_USER: ${DB_USER:-app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-app}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      target: prod
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:3000"
+    networks:
+      - internal
+      - public
+
+  # Optional: run distroless locally to prove it works
+  api-distroless:
+    build:
+      context: .
+      target: prod-distroless
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:3000"
+    networks:
+      - internal
+      - public
+    profiles:
+      - distroless
+
+  migrate:
+    build:
+      context: .
+      target: prod
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["node", "dist/database/migrate.js"]
+    networks:
+      - internal
+    profiles:
+      - jobs
+
+  seed:
+    build:
+      context: .
+      target: prod
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["node", "dist/seeds/seed.js"]
+    networks:
+      - internal
+    profiles:
+      - jobs
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    internal: true
+  public:
