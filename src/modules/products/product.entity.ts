@@ -14,8 +14,8 @@ export class Product {
   @Column({ type: 'int' })
   stock: number;
 
-  // FileRecord.id (nullable) - points to uploaded product image
+  // One image per product (MVP)
   @Column({ type: 'uuid', nullable: true })
-  imageFileId?: string | null;
+  imageFileId: string | null;
 }
 

@@ -2,12 +2,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrdersModule } from './modules/orders/orders.module';
-import { FilesModule } from './modules/files/files.module';
 import { AppGraphqlModule } from './graphql/graphql.module';
 import { User } from './modules/users/user.entity';
 import { Product } from './modules/products/product.entity';
 import { Order } from './modules/orders/order.entity';
 import { OrderItem } from './modules/orders/order-item.entity';
+import { FilesModule } from './modules/files/files.module';
 import { FileRecord } from './modules/files/entities/file-record.entity';
 
 @Module({

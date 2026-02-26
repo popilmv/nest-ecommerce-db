@@ -34,6 +34,134 @@ GraphQL endpoint: `http://localhost:3000/graphql`
 
 Homework notes (schema/resolvers/dataloader + N+1 proof): see **homework07.md**.
 
+---
+
+# Homework 27: Files (S3 + Presigned URLs)
+
+## What is implemented
+
+- `FileRecord` metadata stored in Postgres (`file_records` table)
+- S3 stores bytes (direct upload, backend does **not** proxy file bytes)
+- File lifecycle: `pending -> ready` (via `/files/complete`)
+- Domain integration: Product has `imageFileId`
+- Delivery URL: public files return S3 URL (or CloudFront if `CLOUDFRONT_BASE_URL` is set)
+- Ownership checks:
+  - only **owner** can `complete` the file
+  - product images presign requires `admin`
+
+## Required env
+
+Copy `.env.example` to `.env` and fill AWS values:
+
+```env
+AWS_REGION=eu-central-1
+S3_BUCKET=nodejs-homework-27
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+FILES_PRESIGN_EXPIRES_SEC=120
+```
+
+## Runtime verification: presign -> upload -> complete
+
+> This repo does not include JWT yet. For demo we use DEV auth headers:
+> - `x-user-id: <uuid>` (required)
+> - `x-user-role: admin|user` (optional)
+
+Install jq (optional but recommended):
+
+```bash
+sudo apt-get update && sudo apt-get install -y jq
+```
+
+### 0) Choose a PRODUCT_ID
+
+Use an existing product id from DB:
+
+```sql
+SELECT id, title FROM products;
+```
+
+### 1) Presign
+
+```bash
+BASE_URL=http://localhost:3000
+USER_ID=00000000-0000-0000-0000-000000000001
+ROLE=admin
+PRODUCT_ID=<PUT_PRODUCT_ID_HERE>
+
+RESP=$(curl -s -X POST "$BASE_URL/files/presign" \
+  -H "Content-Type: application/json" \
+  -H "x-user-id: $USER_ID" \
+  -H "x-user-role: $ROLE" \
+  -d "{\"entityType\":\"product\",\"entityId\":\"$PRODUCT_ID\",\"contentType\":\"image/png\",\"size\":5,\"visibility\":\"public\"}")
+
+echo "$RESP" | jq .
+
+FILE_ID=$(echo "$RESP" | jq -r .fileId)
+UPLOAD_URL=$(echo "$RESP" | jq -r .uploadUrl)
+```
+
+### 2) Direct upload to S3 (PUT uploadUrl)
+
+```bash
+printf "hello" > tiny.png
+
+curl -i -X PUT "$UPLOAD_URL" \
+  -H 'Content-Type: image/png' \
+  --data-binary @tiny.png
+```
+
+Expected: `HTTP/1.1 200 OK`
+
+### 3) Complete (pending -> ready)
+
+```bash
+curl -s -X POST "$BASE_URL/files/complete" \
+  -H "Content-Type: application/json" \
+  -H "x-user-id: $USER_ID" \
+  -d "{\"fileId\":\"$FILE_ID\"}" | jq .
+```
+
+Expected:
+
+```json
+{ "ok": true }
+```
+
+### 4) Get delivery URL
+
+```bash
+curl -s "$BASE_URL/files/$FILE_ID" \
+  -H "x-user-id: $USER_ID" | jq .
+```
+
+## Ownership checks (negative tests)
+
+### A) Another user cannot complete чужий файл
+
+```bash
+OTHER_USER_ID=00000000-0000-0000-0000-000000000002
+
+curl -i -X POST "$BASE_URL/files/complete" \
+  -H "Content-Type: application/json" \
+  -H "x-user-id: $OTHER_USER_ID" \
+  -d "{\"fileId\":\"$FILE_ID\"}"
+```
+
+Expected: `403 Forbidden`
+
+### B) Non-admin cannot presign product image
+
+```bash
+curl -i -X POST "$BASE_URL/files/presign" \
+  -H "Content-Type: application/json" \
+  -H "x-user-id: $USER_ID" \
+  -H "x-user-role: user" \
+  -d "{\"entityType\":\"product\",\"entityId\":\"$PRODUCT_ID\",\"contentType\":\"image/png\",\"size\":5,\"visibility\":\"public\"}"
+```
+
+Expected: `403 Forbidden`
+
 ## Seed demo data
 ```
 npm run seed

@@ -1,6 +1,6 @@
-export type AppRole = 'user' | 'admin';
+export type UserRole = 'admin' | 'user';
 
 export interface RequestUser {
   id: string;
-  role: AppRole;
+  role: UserRole;
 }

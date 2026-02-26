@@ -1,23 +1,35 @@
-import { IsIn, IsInt, IsNotEmpty, IsString, IsUUID, Max, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsPositive,
+  IsString,
+  IsUUID,
+  Max,
+} from 'class-validator';
 import { FileVisibility } from '../types/file-visibility.enum';
-import type { FileEntityType } from '../entities/file-record.entity';
 
 export class PresignFileDto {
-  @IsIn(['user', 'product'])
-  entityType: FileEntityType;
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['product', 'user'])
+  entityType: 'product' | 'user';
 
   @IsUUID()
   entityId: string;
 
-  // allowlist for images
+  @IsString()
+  @IsNotEmpty()
   @IsIn(['image/jpeg', 'image/png', 'image/webp'])
   contentType: string;
 
+  // max 10MB for demo
   @IsInt()
-  @Min(1)
-  @Max(10 * 1024 * 1024) // 10 MB
+  @IsPositive()
+  @Max(10 * 1024 * 1024)
   size: number;
 
-  @IsIn([FileVisibility.Private, FileVisibility.Public])
+  @IsEnum(FileVisibility)
   visibility: FileVisibility;
 }

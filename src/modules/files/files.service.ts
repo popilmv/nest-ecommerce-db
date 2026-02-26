@@ -1,75 +1,82 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
-
+import { Product } from '../products/product.entity';
+import { PresignFileDto } from './dto/presign-file.dto';
+import { CompleteFileDto } from './dto/complete-file.dto';
 import { FileRecord } from './entities/file-record.entity';
+import { S3Service } from './storage/s3.service';
 import { FileStatus } from './types/file-status.enum';
 import { FileVisibility } from './types/file-visibility.enum';
-import { S3Service } from './storage/s3.service';
-import { Product } from '../products/product.entity';
-import type { RequestUser } from '../../common/auth/user.types';
-import type { PresignFileDto } from './dto/presign-file.dto';
+import { RequestUser } from '../../common/auth/user.types';
 
 @Injectable()
 export class FilesService {
-  private readonly bucket: string;
-  private readonly presignExpiresSec: number;
-  private readonly cloudfrontBaseUrl?: string;
-
   constructor(
     private readonly config: ConfigService,
     private readonly s3: S3Service,
-    @InjectRepository(FileRecord) private readonly filesRepo: Repository<FileRecord>,
-    @InjectRepository(Product) private readonly productsRepo: Repository<Product>,
-  ) {
-    this.bucket = this.config.getOrThrow<string>('S3_BUCKET');
-    this.presignExpiresSec = Number(this.config.get<string>('FILES_PRESIGN_EXPIRES_SEC') ?? '120');
-    this.cloudfrontBaseUrl = this.config.get<string>('CLOUDFRONT_BASE_URL') ?? undefined;
+    @InjectRepository(FileRecord)
+    private readonly filesRepo: Repository<FileRecord>,
+    @InjectRepository(Product)
+    private readonly productsRepo: Repository<Product>,
+  ) {}
+
+  private get bucket(): string {
+    const bucket = this.config.get<string>('S3_BUCKET');
+    if (!bucket) throw new Error('Missing S3_BUCKET in env');
+    return bucket;
   }
 
-  /**
-   * Generates canonical object key.
-   * NOTE: client must NOT send key.
-   */
-  private buildKey(args: { entityType: 'product' | 'user'; entityId: string; contentType: string }): string {
-    const ext = this.extFromContentType(args.contentType);
-    const id = uuidv4();
+  private get presignExpiresSec(): number {
+    return Number(this.config.get<string>('FILES_PRESIGN_EXPIRES_SEC') || 120);
+  }
 
-    if (args.entityType === 'product') {
-      return `products/${args.entityId}/images/${id}.${ext}`;
+  private get cloudfrontBaseUrl(): string | undefined {
+    const v = this.config.get<string>('CLOUDFRONT_BASE_URL');
+    return v || undefined;
+  }
+
+  private buildKey(dto: PresignFileDto): string {
+    const ext = dto.contentType === 'image/jpeg'
+      ? 'jpg'
+      : dto.contentType === 'image/png'
+        ? 'png'
+        : 'webp';
+
+    const fileUuid = uuidv4();
+
+    if (dto.entityType === 'product') {
+      return `products/${dto.entityId}/images/${fileUuid}.${ext}`;
     }
 
-    return `users/${args.entityId}/avatars/${id}.${ext}`;
+    // user
+    return `users/${dto.entityId}/avatars/${fileUuid}.${ext}`;
   }
 
-  private extFromContentType(contentType: string): string {
-    switch (contentType) {
-      case 'image/jpeg':
-        return 'jpg';
-      case 'image/png':
-        return 'png';
-      case 'image/webp':
-        return 'webp';
-      default:
-        throw new BadRequestException('Unsupported contentType');
-    }
-  }
-
-  async presignUpload(user: RequestUser, dto: PresignFileDto) {
-    // minimal RBAC example: only admin can upload product images
+  private assertCanPresign(user: RequestUser, dto: PresignFileDto) {
+    // For demo: product images require admin
     if (dto.entityType === 'product' && user.role !== 'admin') {
       throw new ForbiddenException('Only admin can upload product images');
     }
 
-    // You can also verify entity existence
-    if (dto.entityType === 'product') {
-      const exists = await this.productsRepo.exist({ where: { id: dto.entityId } });
-      if (!exists) throw new NotFoundException('Product not found');
+    // For user avatar: only owner can presign for self
+    if (dto.entityType === 'user' && user.id !== dto.entityId) {
+      throw new ForbiddenException('Cannot upload avatar for another user');
     }
+  }
 
-    const key = this.buildKey({ entityType: dto.entityType, entityId: dto.entityId, contentType: dto.contentType });
+  async presign(user: RequestUser, dto: PresignFileDto) {
+    this.assertCanPresign(user, dto);
+
+    const key = this.buildKey(dto);
 
     const file = this.filesRepo.create({
       ownerId: user.id,
@@ -83,77 +90,75 @@ export class FilesService {
       status: FileStatus.Pending,
     });
 
-    const saved = await this.filesRepo.save(file);
+    await this.filesRepo.save(file);
 
     const uploadUrl = await this.s3.createPresignedPutUrl({
-      bucket: this.bucket,
-      key,
-      contentType: dto.contentType,
+      bucket: file.bucket,
+      key: file.key,
+      contentType: file.contentType,
       expiresInSec: this.presignExpiresSec,
     });
 
     return {
-      fileId: saved.id,
-      key: saved.key,
+      fileId: file.id,
+      key: file.key,
       uploadUrl,
-      contentType: saved.contentType,
+      contentType: file.contentType,
     };
   }
 
-  async completeUpload(user: RequestUser, fileId: string) {
-    const file = await this.filesRepo.findOne({ where: { id: fileId } });
+  async complete(user: RequestUser, dto: CompleteFileDto) {
+    const file = await this.filesRepo.findOne({ where: { id: dto.fileId } });
     if (!file) throw new NotFoundException('File not found');
 
-    if (file.ownerId !== user.id && user.role !== 'admin') {
-      throw new ForbiddenException('You cannot complete чужий файл');
+    // Ownership check (required by HW)
+    if (file.ownerId !== user.id) {
+      throw new ForbiddenException('Cannot complete чужий файл');
     }
 
     if (file.status !== FileStatus.Pending) {
-      throw new BadRequestException('File is not in pending status');
+      throw new ConflictException('File is not pending');
     }
 
     file.status = FileStatus.Ready;
     await this.filesRepo.save(file);
 
-    // bind to domain entity
+    // Domain integration (Product image)
     if (file.entityType === 'product') {
-      // If you prefer, enforce admin here too
       await this.productsRepo.update({ id: file.entityId }, { imageFileId: file.id });
     }
 
     return { ok: true };
   }
 
-  buildPublicUrl(key: string): string {
-    if (this.cloudfrontBaseUrl) {
-      return `${this.cloudfrontBaseUrl.replace(/\/$/, '')}/${key}`;
-    }
-    // dev fallback (works only if your bucket/object is readable or you use presigned GET)
-    return `https://${this.bucket}.s3.${this.config.getOrThrow<string>('AWS_REGION')}.amazonaws.com/${key}`;
-  }
-
-  async getViewUrl(user: RequestUser, fileId: string) {
+  async getFileUrl(user: RequestUser, fileId: string) {
     const file = await this.filesRepo.findOne({ where: { id: fileId } });
     if (!file) throw new NotFoundException('File not found');
 
-    const isOwner = file.ownerId === user.id;
-    const canRead =
-      file.visibility === FileVisibility.Public ||
-      isOwner ||
-      user.role === 'admin';
-
-    if (!canRead) throw new ForbiddenException('No access to this file');
-
-    // If public delivery is ok → return CDN/S3 URL.
-    // For private visibility in dev → you can return presigned GET instead.
-    if (file.visibility === FileVisibility.Public) {
-      return { url: this.buildPublicUrl(file.key) };
+    if (file.status !== FileStatus.Ready) {
+      throw new BadRequestException('File is not ready');
     }
 
+    // Authorization on backend
+    if (file.visibility === FileVisibility.Private && file.ownerId !== user.id) {
+      throw new ForbiddenException('No access to this file');
+    }
+
+    // Public delivery: CloudFront (preferred) or S3 URL
+    if (file.visibility === FileVisibility.Public) {
+      if (this.cloudfrontBaseUrl) {
+        return { url: `${this.cloudfrontBaseUrl.replace(/\/$/, '')}/${file.key}` };
+      }
+      return {
+        url: `https://${file.bucket}.s3.${this.config.get<string>('AWS_REGION')}.amazonaws.com/${file.key}`,
+      };
+    }
+
+    // Private: short-lived presigned GET
     const url = await this.s3.createPresignedGetUrl({
       bucket: file.bucket,
       key: file.key,
-      expiresInSec: 120,
+      expiresInSec: this.presignExpiresSec,
     });
 
     return { url };

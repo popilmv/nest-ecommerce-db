@@ -2,14 +2,12 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
-  Index,
 } from 'typeorm';
 import { FileStatus } from '../types/file-status.enum';
 import { FileVisibility } from '../types/file-visibility.enum';
-
-export type FileEntityType = 'user' | 'product';
 
 @Entity('file_records')
 export class FileRecord {
@@ -22,7 +20,7 @@ export class FileRecord {
 
   @Index()
   @Column({ type: 'text' })
-  entityType: FileEntityType;
+  entityType: string; // 'user' | 'product' | ...
 
   @Index()
   @Column({ type: 'uuid' })
@@ -44,10 +42,16 @@ export class FileRecord {
   @Column({ type: 'text', nullable: true })
   checksum?: string | null;
 
-  @Column({ type: 'text', default: FileVisibility.Private })
+  @Column({
+    type: 'text',
+    default: FileVisibility.Private,
+  })
   visibility: FileVisibility;
 
-  @Column({ type: 'text', default: FileStatus.Pending })
+  @Column({
+    type: 'text',
+    default: FileStatus.Pending,
+  })
   status: FileStatus;
 
   @CreateDateColumn()

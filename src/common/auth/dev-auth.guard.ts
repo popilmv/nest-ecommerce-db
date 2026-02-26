@@ -1,23 +1,31 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
-import type { RequestUser } from './user.types';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { RequestUser, UserRole } from './user.types';
 
 /**
- * DEV ONLY auth guard.
- * Reads:
- *  - x-user-id: UUID
- *  - x-user-role: user|admin (optional, default user)
+ * DEV ONLY guard to simulate authentication.
  *
- * Replace with real JWT AuthGuard in production.
+ * Required header:
+ *  - x-user-id: <uuid>
+ * Optional:
+ *  - x-user-role: admin|user (default: user)
  */
 @Injectable()
 export class DevAuthGuard implements CanActivate {
-  canActivate(ctx: ExecutionContext): boolean {
-    const req = ctx.switchToHttp().getRequest();
-    const userId = (req.headers['x-user-id'] as string | undefined)?.trim();
-    if (!userId) throw new UnauthorizedException('Missing x-user-id header (dev auth)');
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest();
+    const userId = req.header('x-user-id');
 
-    const roleRaw = (req.headers['x-user-role'] as string | undefined)?.trim() ?? 'user';
-    const role = roleRaw === 'admin' ? 'admin' : 'user';
+    if (!userId) {
+      throw new UnauthorizedException('Missing x-user-id header');
+    }
+
+    const roleHeader = (req.header('x-user-role') || 'user') as UserRole;
+    const role: UserRole = roleHeader === 'admin' ? 'admin' : 'user';
 
     const user: RequestUser = { id: userId, role };
     req.user = user;
