@@ -1,4 +1,9 @@
-import { ArgumentsHost, Catch, ExceptionFilter } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException as NestHttpException,
+} from '@nestjs/common';
 import { Request, Response } from 'express';
 import { HttpException } from '../errors/http-exception';
 
@@ -14,6 +19,25 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
     const timestamp = new Date().toISOString();
     const path = req.url ?? 'n/a';
+    // Preserve NestJS built-in HTTP exceptions (401/403/404/409/etc.)
+    if (exception instanceof NestHttpException) {
+      const statusCode = exception.getStatus();
+      const responseBody = exception.getResponse() as any;
+
+      const message =
+        typeof responseBody === 'string'
+          ? responseBody
+          : responseBody?.message ?? exception.message;
+
+      return res.status(statusCode).json({
+        statusCode,
+        code: 'HTTP_ERROR',
+        message,
+        details: typeof responseBody === 'object' ? responseBody : undefined,
+        path,
+        timestamp,
+      });
+    }    
 
     if (exception instanceof HttpException) {
       return res.status(exception.statusCode).json({

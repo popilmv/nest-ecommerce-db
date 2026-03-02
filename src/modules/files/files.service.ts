@@ -96,7 +96,7 @@ export class FilesService {
       bucket: file.bucket,
       key: file.key,
       contentType: file.contentType,
-      expiresInSec: this.presignExpiresSec,
+      expiresInSeconds: this.presignExpiresSec,
     });
 
     return {
@@ -158,7 +158,7 @@ export class FilesService {
     const url = await this.s3.createPresignedGetUrl({
       bucket: file.bucket,
       key: file.key,
-      expiresInSec: this.presignExpiresSec,
+      expiresInSeconds: this.presignExpiresSec,
     });
 
     return { url };

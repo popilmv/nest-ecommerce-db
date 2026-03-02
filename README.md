@@ -61,11 +61,59 @@ AWS_SECRET_ACCESS_KEY=...
 FILES_PRESIGN_EXPIRES_SEC=120
 ```
 
-## Runtime verification: presign -> upload -> complete
+## Quick start (recommended)
 
-> This repo does not include JWT yet. For demo we use DEV auth headers:
-> - `x-user-id: <uuid>` (required)
-> - `x-user-role: admin|user` (optional)
+From project root:
+
+```bash
+npm ci
+npm run build
+npm run migration:run
+npm run seed
+npm run start:dev
+```
+
+API: `http://localhost:3000`  
+GraphQL: `http://localhost:3000/graphql`
+
+## Local S3 option (MinIO) — reproducible end-to-end upload
+
+1) Start MinIO:
+
+```bash
+docker run -d --name minio \
+  -p 9000:9000 -p 9001:9001 \
+  -e MINIO_ROOT_USER=minio \
+  -e MINIO_ROOT_PASSWORD=minio12345 \
+  minio/minio server /data --console-address ":9001"
+```
+
+2) Open MinIO console and create bucket:
+
+- Console: `http://localhost:9001`
+- Login: `minio` / `minio12345`
+- Create bucket: `nodejs-homework-27`
+
+3) Set env for MinIO (in your `.env`):
+
+```env
+AWS_REGION=us-east-1
+S3_BUCKET=nodejs-homework-27
+
+S3_ENDPOINT=http://localhost:9000
+S3_FORCE_PATH_STYLE=true
+AWS_ACCESS_KEY_ID=minio
+AWS_SECRET_ACCESS_KEY=minio12345
+
+FILES_PRESIGN_EXPIRES_SEC=120
+# Optional (delivery)
+# CLOUDFRONT_BASE_URL=https://<your-cloudfront-domain>
+```
+
+Now the same `presign -> PUT uploadUrl -> complete` flow below should return `HTTP 200 OK` on the PUT step.
+
+
+## Runtime verification: presign -> upload -> complete
 
 Install jq (optional but recommended):
 
@@ -113,6 +161,19 @@ curl -i -X PUT "$UPLOAD_URL" \
 
 Expected: `HTTP/1.1 200 OK`
 
+## Troubleshooting direct upload
+
+### PUT uploadUrl returns `403 InvalidAccessKeyId`
+That means the S3 credentials used by the backend to generate the presigned URL are not valid for the bucket/region.
+
+- For AWS: re-check `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`
+- For reproducible local testing: use the **MinIO** setup above.
+
+### PUT uploadUrl returns `SignatureDoesNotMatch`
+Most common reasons:
+- `Content-Type` header on PUT differs from the one used when presigning
+- clock skew on the machine
+
 ### 3) Complete (pending -> ready)
 
 ```bash
@@ -150,6 +211,18 @@ curl -i -X POST "$BASE_URL/files/complete" \
 
 Expected: `403 Forbidden`
 
+## Expected HTTP status codes (edge cases)
+
+These are important for security + correctness:
+
+- `POST /files/presign` without `x-user-id` → **401**
+- `POST /files/presign` as non-admin for `entityType=product` → **403**
+- `POST /files/complete` with чужий `fileId` → **403** (or **404** if you hide existence)
+- `POST /files/complete` for already-ready file → **409**
+- `GET /files/:id` without access → **403**/**404**
+
+If you see **500**, check the global exception filter (`AllExceptionsFilter`) — it must preserve NestJS `HttpException` (401/403/404/409).
+
 ### B) Non-admin cannot presign product image
 
 ```bash
@@ -161,6 +234,18 @@ curl -i -X POST "$BASE_URL/files/presign" \
 ```
 
 Expected: `403 Forbidden`
+
+## Expected HTTP status codes (edge cases)
+
+These are important for security + correctness:
+
+- `POST /files/presign` without `x-user-id` → **401**
+- `POST /files/presign` as non-admin for `entityType=product` → **403**
+- `POST /files/complete` with чужий `fileId` → **403** (or **404** if you hide existence)
+- `POST /files/complete` for already-ready file → **409**
+- `GET /files/:id` without access → **403**/**404**
+
+If you see **500**, check the global exception filter (`AllExceptionsFilter`) — it must preserve NestJS `HttpException` (401/403/404/409).
 
 ## Seed demo data
 ```
@@ -186,9 +271,6 @@ curl -i \
 ## No partial writes
 
 Trigger a business error:
-
-
-
 
 <img width="407" height="108" alt="image" src="https://github.com/user-attachments/assets/64faea3b-7738-44aa-b0ce-496b4af3af53" />
 

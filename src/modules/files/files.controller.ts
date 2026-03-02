@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { DevAuthGuard } from '../../common/auth/dev-auth.guard';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
-import { RequestUser } from '../../common/auth/user.types';
+import type { RequestUser } from '../../common/auth/user.types';
 import { CompleteFileDto } from './dto/complete-file.dto';
 import { PresignFileDto } from './dto/presign-file.dto';
 import { FilesService } from './files.service';

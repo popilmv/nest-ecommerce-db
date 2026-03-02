@@ -4,7 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { RequestUser, UserRole } from './user.types';
+import type { RequestUser, UserRole } from './user.types';
 
 /**
  * DEV ONLY guard to simulate authentication.

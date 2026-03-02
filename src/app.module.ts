@@ -23,7 +23,7 @@ import { FileRecord } from './modules/files/entities/file-record.entity';
       database: process.env.DB_NAME,
       ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
       entities: [User, Product, Order, OrderItem, FileRecord],
-      synchronize: true,
+      synchronize: false,
       logging: ['query'],
     }),
 
