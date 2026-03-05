@@ -397,16 +397,16 @@ cp .env.example .env
 ### 2) Dev (hot reload)
 
 ```bash
-docker-compose -f compose.yml -f compose.dev.yml up --build
+docker compose -f compose.yml -f compose.dev.yml up --build
 ```
 
-- API: http://localhost:8080
+- API: http://localhost:${API_PORT:-8080}
 - Postgres: **not exposed** (no `ports:`), only available on the internal network.
 
 ### 3) Prod-like local run
 
 ```bash
-docker-compose -f compose.yml up --build
+docker compose -f compose.yml up --build
 ```
 
 ### 4) Run DB jobs (one-off containers)
@@ -414,22 +414,24 @@ docker-compose -f compose.yml up --build
 Migrate (schema sync in this project):
 
 ```bash
-docker-compose -f compose.yml --profile jobs run --rm migrate
+docker compose -f compose.yml --profile jobs run --rm migrate
 ```
 
 Seed:
 
 ```bash
-docker-compose -f compose.yml --profile jobs run --rm seed
+docker compose -f compose.yml --profile jobs run --rm seed
 ```
 
 ### 5) Distroless proof (must start)
 
-Run distroless API variant (on **8081**):
+Run distroless API variant (on **${API_DISTROLESS_PORT:-8081}**):
 
 ```bash
-docker-compose -f compose.yml --profile distroless up --build api-distroless
+docker compose -f compose.yml --profile distroless up --build api-distroless
 ```
+
+> Note: If your CI sets `COMPOSE_PROJECT_NAME`, Docker Compose requires it to be **lowercase**.
 
 ### 6) Image size & history (proof of optimization)
 
@@ -461,8 +463,16 @@ docker history ecommerce-api:prod-distroless
 Prod (alpine) container runs as `node` user:
 
 ```bash
-docker-compose exec api id
+docker compose exec api id
 ```
 
-Distroless has no shell; non-root is guaranteed by the base image defaults.
-(If you need a hard proof, run the `prod` target for `id` and document that `prod-distroless` uses a nonroot distroless base.)
+Distroless has no shell; non-root is guaranteed by using the **`:nonroot`** distroless base.
+
+Hard proof (works without entering the container):
+
+```bash
+docker image inspect ecommerce-api:prod --format '{{.Config.User}}'
+docker image inspect ecommerce-api:prod-distroless --format '{{.Config.User}}'
+```
+
+Expected: `prod` -> `node`, `prod-distroless` -> non-root uid (e.g. `65532`).
