@@ -76,22 +76,19 @@ Send request headers:
 This setup matches the proven local run (ports and bucket names below).
 
 ### 1) Start Postgres (clean)
-```bash
-docker rm -f new_img 2>/dev/null || true
-
+```
 docker run -d --name new_img \
   -e POSTGRES_DB=app \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=postgres \
   -p 26432:5432 \
   postgres:16-alpine
+```
 
-
-Create bucket uploads:
+## Create bucket uploads:
 ```
 node - <<'NODE'
 const { S3Client, CreateBucketCommand, HeadBucketCommand } = require('@aws-sdk/client-s3');
-
 (async () => {
   const client = new S3Client({
     region: 'us-east-1',
@@ -99,7 +96,6 @@ const { S3Client, CreateBucketCommand, HeadBucketCommand } = require('@aws-sdk/c
     forcePathStyle: true,
     credentials: { accessKeyId: 'minio', secretAccessKey: 'minio12345' },
   });
-
   const Bucket = 'uploads';
   try {
     await client.send(new HeadBucketCommand({ Bucket }));
@@ -112,24 +108,23 @@ const { S3Client, CreateBucketCommand, HeadBucketCommand } = require('@aws-sdk/c
 NODE
 ```
 
-Install + build
+## Install + build
 
 ```
 npm ci
 npm run build
 ```
 
-DB schema + seed
+## DB schema + seed
 ```
 env DB_HOST=127.0.0.1 DB_PORT=26432 DB_USER=postgres DB_PASSWORD=postgres DB_NAME=app \
   npm run migrate
-
 env DB_HOST=127.0.0.1 DB_PORT=26432 DB_USER=postgres DB_PASSWORD=postgres DB_NAME=app \
   npm run seed
 ```
 
 
-Start API
+## Start API
 
 ```
 env PORT=21164 \
@@ -140,14 +135,13 @@ FILES_PRESIGN_EXPIRES_SEC=120 \
 npm run start
 ```
 
-
-Runtime verification (E2E): presign -> upload -> complete -> view URL
+## Runtime verification (E2E): presign -> upload -> complete -> view URL
 Pick a PRODUCT_ID
 ```
 PRODUCT_ID=$(docker exec -i new_img psql -U postgres -d app -At -c "select id from products limit 1;")
 echo "PRODUCT_ID=$PRODUCT_ID"
 ```
-Presign (admin for product)
+## Presign (admin for product)
 ```
 BASE_URL=http://127.0.0.1:21164
 USER_ID=11111111-1111-1111-1111-111111111111
@@ -165,23 +159,19 @@ echo "UPLOAD_URL=$UPLOAD_URL"
 
 Expected response contains:
 fileId
-
 key like products/<productId>/images/<uuid>.png
-
 uploadUrl (presigned PUT)
 
- Direct upload to S3 (PUT uploadUrl)
+## Direct upload to S3 (PUT uploadUrl)
 ```
 printf 'PNG' > /tmp/demo.png
-
 curl -i -X PUT "$UPLOAD_URL" \
   -H "Content-Type: image/png" \
   --data-binary "@/tmp/demo.png"
 ```
-
 Expected: HTTP/1.1 200 OK (MinIO)
 
-Complete (pending -> ready)
+## Complete (pending -> ready)
 ```
 curl -i -X POST "$BASE_URL/files/complete" \
   -H "content-type: application/json" \
@@ -192,7 +182,7 @@ curl -i -X POST "$BASE_URL/files/complete" \
 
 Expected: HTTP/1.1 201 Created and body { "ok": true }
 
-DB proof (status + integration)
+## DB proof (status + integration)
 
 FileRecord is ready:
 
@@ -203,26 +193,22 @@ docker exec -i new_img psql -U postgres -d app -c \
 "select id, \"imageFileId\" from products where id='$PRODUCT_ID';"
 ```
 
-Delivery URL (view)
+## Delivery URL (view)
 ```
 URL_JSON=$(curl -sS "$BASE_URL/files/$FILE_ID" \
   -H "x-user-id: $USER_ID" \
   -H "x-user-role: admin")
-
 echo "$URL_JSON"
-
 VIEW_URL=$(node -e "const fs=require('fs');const o=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(o.url || o.viewUrl || '')" <<<"$URL_JSON")
 echo "VIEW_URL=$VIEW_URL"
-
 curl -i "$VIEW_URL"
 ```
 
 Expected:
 GET /files/:id returns { "url": "..." }
-
 curl -i "$VIEW_URL" returns HTTP/1.1 200 OK
 
-Security / edge cases (negative tests)
+## Security / edge cases (negative tests)
 A) Another user cannot complete чужий файл (ownership)
 OTHER_USER_ID=22222222-2222-2222-2222-222222222222
 
@@ -248,11 +234,11 @@ curl -i -X POST "$BASE_URL/files/complete" \
 Expected: HTTP/1.1 409 Conflict (File is not pending)
 
 Expected status codes summary
-POST /files/presign without x-user-id -> 401
-POST /files/presign as non-admin for entityType=product -> 403
-PUT uploadUrl -> 200/204
-POST /files/complete чужий fileId -> 403 (or 404 if hiding existence)
-POST /files/complete already-ready -> 409
-GET /files/:id -> 200 with { url } and curl url -> 200
+- POST /files/presign without x-user-id -> 401
+- POST /files/presign as non-admin for entityType=product -> 403
+- PUT uploadUrl -> 200/204
+- POST /files/complete чужий fileId -> 403 (or 404 if hiding existence)
+- POST /files/complete already-ready -> 409
+- GET /files/:id -> 200 with { url } and curl url -> 200
 
 
