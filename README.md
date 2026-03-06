@@ -1,4 +1,21 @@
-# Transactional Order Creation + SQL Optimization (NestJS + PostgreSQL + TypeORM)
+# NestJS E-commerce Backend (Postgres + TypeORM) — Transactions + Files (S3 Presigned Upload)
+
+This repo contains:
+1) **Transactional order creation** (transactions, idempotency, concurrency safety)
+2) **Homework 27: Files** — secure image upload to S3 via **presigned URLs** with DB metadata, lifecycle statuses, access control, and domain integration.
+
+---
+
+## Tech stack
+- NestJS
+- PostgreSQL
+- TypeORM
+- AWS SDK v3 (S3)
+- MinIO for local reproducible S3
+
+---
+
+# Part A — Transactional Order Creation + SQL Optimization
 
 ## Goal
 Implement safe `createOrder` for an e-commerce backend:
@@ -6,473 +23,236 @@ Implement safe `createOrder` for an e-commerce backend:
 - idempotency (double-submit safe)
 - oversell protection (concurrency)
 
----
-
-## Tech stack
-- NestJS
-- PostgreSQL (local)
-- TypeORM
-- QueryRunner transactions
-- Pessimistic locking (row-level)
-
-```
-npm i @nestjs/typeorm typeorm pg
-npm i @nestjs/config
-```
-
-I use local PosgreSQL so create new DB:
-```
-CREATE DATABASE ecommerce_db_hw;
-```
-## RUN API
-```
-npm run start:dev
-```
 ## GraphQL
-
-GraphQL endpoint: `http://localhost:3000/graphql`
+GraphQL endpoint: `http://localhost:21164/graphql`
 
 Homework notes (schema/resolvers/dataloader + N+1 proof): see **homework07.md**.
 
 ---
 
-# Homework 27: Files (S3 + Presigned URLs)
+# Part B — Homework 27: Files (S3 + Presigned URLs)
+
+## Goal
+Implement safe image upload to S3 through **presigned PUT**, so that:
+- file bytes go directly to S3 (backend does **not** proxy bytes)
+- metadata is stored in Postgres (`FileRecord`)
+- lifecycle is tracked: `pending -> ready`
+- access is enforced (roles/scopes + ownership)
+- at least one domain is integrated (Products or Users)
+- delivery URL is available (dev: presigned GET; ideal: CloudFront)
+
+---
 
 ## What is implemented
+- ✅ `FileRecord` persisted in Postgres (`file_records`)
+  - fields: `ownerId`, `entityId`, `key`, `contentType`, `size`, `status (pending|ready)`, `visibility (private|public)`
+- ✅ Backend-only key generation (`products/{productId}/images/{uuid}.png`)
+  - user **cannot** provide a custom key/path
+- ✅ `POST /files/presign`
+  - access check: product images require `admin`
+  - creates `FileRecord` with `status=pending`
+  - returns **presigned PUT uploadUrl**
+- ✅ Direct upload: `PUT uploadUrl` -> S3/MinIO (no backend proxy)
+- ✅ `POST /files/complete`
+  - ownership check (only owner can complete)
+  - prevents re-complete (`409 File is not pending`)
+  - updates `pending -> ready`
+  - domain integration: `products.imageFileId = fileId`
+- ✅ Delivery:
+  - `GET /files/:id` returns `{ url }`
+  - in dev (MinIO/private): returns **presigned GET**
+  - optional: CloudFront if `CLOUDFRONT_BASE_URL` is set
 
-- `FileRecord` metadata stored in Postgres (`file_records` table)
-- S3 stores bytes (direct upload, backend does **not** proxy file bytes)
-- File lifecycle: `pending -> ready` (via `/files/complete`)
-- Domain integration: Product has `imageFileId`
-- Delivery URL: public files return S3 URL (or CloudFront if `CLOUDFRONT_BASE_URL` is set)
-- Ownership checks:
-  - only **owner** can `complete` the file
-  - product images presign requires `admin`
+---
 
-## Required env
+## Dev auth model (for homework)
+Send request headers:
+- `x-user-id: <uuid>`
+- `x-user-role: admin|user`
 
-Copy `.env.example` to `.env` and fill AWS values:
+---
 
-```env
-AWS_REGION=eu-central-1
-S3_BUCKET=nodejs-homework-27
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-FILES_PRESIGN_EXPIRES_SEC=120
+## Local quick start (reproducible end-to-end)
+This setup matches the proven local run (ports and bucket names below).
+
+### 1) Start Postgres (clean)
+```bash
+docker rm -f new_img 2>/dev/null || true
+
+docker run -d --name new_img \
+  -e POSTGRES_DB=app \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 26432:5432 \
+  postgres:16-alpine
+
+
+Create bucket uploads:
+```
+node - <<'NODE'
+const { S3Client, CreateBucketCommand, HeadBucketCommand } = require('@aws-sdk/client-s3');
+
+(async () => {
+  const client = new S3Client({
+    region: 'us-east-1',
+    endpoint: 'http://127.0.0.1:29164',
+    forcePathStyle: true,
+    credentials: { accessKeyId: 'minio', secretAccessKey: 'minio12345' },
+  });
+
+  const Bucket = 'uploads';
+  try {
+    await client.send(new HeadBucketCommand({ Bucket }));
+    console.log('bucket exists:', Bucket);
+  } catch {
+    await client.send(new CreateBucketCommand({ Bucket }));
+    console.log('bucket created:', Bucket);
+  }
+})();
+NODE
 ```
 
-## Quick start (recommended)
+Install + build
 
-From project root:
-
-```bash
+```
 npm ci
 npm run build
-npm run migration:run
-npm run seed
-npm run start:dev
 ```
 
-API: `http://localhost:3000`  
-GraphQL: `http://localhost:3000/graphql`
+DB schema + seed
+```
+env DB_HOST=127.0.0.1 DB_PORT=26432 DB_USER=postgres DB_PASSWORD=postgres DB_NAME=app \
+  npm run migrate
 
-## Local S3 option (MinIO) — reproducible end-to-end upload
-
-1) Start MinIO:
-
-```bash
-docker run -d --name minio \
-  -p 9000:9000 -p 9001:9001 \
-  -e MINIO_ROOT_USER=minio \
-  -e MINIO_ROOT_PASSWORD=minio12345 \
-  minio/minio server /data --console-address ":9001"
+env DB_HOST=127.0.0.1 DB_PORT=26432 DB_USER=postgres DB_PASSWORD=postgres DB_NAME=app \
+  npm run seed
 ```
 
-2) Open MinIO console and create bucket:
 
-- Console: `http://localhost:9001`
-- Login: `minio` / `minio12345`
-- Create bucket: `nodejs-homework-27`
+Start API
 
-3) Set env for MinIO (in your `.env`):
-
-```env
-AWS_REGION=us-east-1
-S3_BUCKET=nodejs-homework-27
-
-S3_ENDPOINT=http://localhost:9000
-S3_FORCE_PATH_STYLE=true
-AWS_ACCESS_KEY_ID=minio
-AWS_SECRET_ACCESS_KEY=minio12345
-
-FILES_PRESIGN_EXPIRES_SEC=120
-# Optional (delivery)
-# CLOUDFRONT_BASE_URL=https://<your-cloudfront-domain>
+```
+env PORT=21164 \
+DB_HOST=127.0.0.1 DB_PORT=26432 DB_USER=postgres DB_PASSWORD=postgres DB_NAME=app \
+S3_ENDPOINT=http://127.0.0.1:29164 S3_FORCE_PATH_STYLE=true S3_BUCKET=uploads \
+AWS_REGION=us-east-1 AWS_ACCESS_KEY_ID=minio AWS_SECRET_ACCESS_KEY=minio12345 \
+FILES_PRESIGN_EXPIRES_SEC=120 \
+npm run start
 ```
 
-Now the same `presign -> PUT uploadUrl -> complete` flow below should return `HTTP 200 OK` on the PUT step.
 
-
-## Runtime verification: presign -> upload -> complete
-
-Install jq (optional but recommended):
-
-```bash
-sudo apt-get update && sudo apt-get install -y jq
+Runtime verification (E2E): presign -> upload -> complete -> view URL
+Pick a PRODUCT_ID
 ```
-
-### 0) Choose a PRODUCT_ID
-
-Use an existing product id from DB:
-
-```sql
-SELECT id, title FROM products;
+PRODUCT_ID=$(docker exec -i new_img psql -U postgres -d app -At -c "select id from products limit 1;")
+echo "PRODUCT_ID=$PRODUCT_ID"
 ```
-
-### 1) Presign
-
-```bash
-BASE_URL=http://localhost:3000
-USER_ID=00000000-0000-0000-0000-000000000001
-ROLE=admin
-PRODUCT_ID=<PUT_PRODUCT_ID_HERE>
-
-RESP=$(curl -s -X POST "$BASE_URL/files/presign" \
-  -H "Content-Type: application/json" \
+Presign (admin for product)
+```
+BASE_URL=http://127.0.0.1:21164
+USER_ID=11111111-1111-1111-1111-111111111111
+PRESIGN_JSON=$(curl -sS -X POST "$BASE_URL/files/presign" \
+  -H "content-type: application/json" \
   -H "x-user-id: $USER_ID" \
-  -H "x-user-role: $ROLE" \
-  -d "{\"entityType\":\"product\",\"entityId\":\"$PRODUCT_ID\",\"contentType\":\"image/png\",\"size\":5,\"visibility\":\"public\"}")
-
-echo "$RESP" | jq .
-
-FILE_ID=$(echo "$RESP" | jq -r .fileId)
-UPLOAD_URL=$(echo "$RESP" | jq -r .uploadUrl)
+  -H "x-user-role: admin" \
+  -d "{\"entityType\":\"product\",\"entityId\":\"$PRODUCT_ID\",\"contentType\":\"image/png\",\"size\":3,\"visibility\":\"private\"}")
+echo "PRESIGN_JSON=$PRESIGN_JSON"
+FILE_ID=$(node -e "const fs=require('fs');const o=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(o.fileId)" <<<"$PRESIGN_JSON")
+UPLOAD_URL=$(node -e "const fs=require('fs');const o=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(o.uploadUrl)" <<<"$PRESIGN_JSON")
+echo "FILE_ID=$FILE_ID"
+echo "UPLOAD_URL=$UPLOAD_URL"
 ```
 
-### 2) Direct upload to S3 (PUT uploadUrl)
+Expected response contains:
+fileId
 
-```bash
-printf "hello" > tiny.png
+key like products/<productId>/images/<uuid>.png
+
+uploadUrl (presigned PUT)
+
+ Direct upload to S3 (PUT uploadUrl)
+```
+printf 'PNG' > /tmp/demo.png
 
 curl -i -X PUT "$UPLOAD_URL" \
-  -H 'Content-Type: image/png' \
-  --data-binary @tiny.png
+  -H "Content-Type: image/png" \
+  --data-binary "@/tmp/demo.png"
 ```
 
-Expected: `HTTP/1.1 200 OK`
+Expected: HTTP/1.1 200 OK (MinIO)
 
-## Troubleshooting direct upload
-
-### PUT uploadUrl returns `403 InvalidAccessKeyId`
-That means the S3 credentials used by the backend to generate the presigned URL are not valid for the bucket/region.
-
-- For AWS: re-check `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`
-- For reproducible local testing: use the **MinIO** setup above.
-
-### PUT uploadUrl returns `SignatureDoesNotMatch`
-Most common reasons:
-- `Content-Type` header on PUT differs from the one used when presigning
-- clock skew on the machine
-
-### 3) Complete (pending -> ready)
-
-```bash
-curl -s -X POST "$BASE_URL/files/complete" \
-  -H "Content-Type: application/json" \
-  -H "x-user-id: $USER_ID" \
-  -d "{\"fileId\":\"$FILE_ID\"}" | jq .
+Complete (pending -> ready)
 ```
-
-Expected:
-
-```json
-{ "ok": true }
-```
-
-### 4) Get delivery URL
-
-```bash
-curl -s "$BASE_URL/files/$FILE_ID" \
-  -H "x-user-id: $USER_ID" | jq .
-```
-
-## Ownership checks (negative tests)
-
-### A) Another user cannot complete чужий файл
-
-```bash
-OTHER_USER_ID=00000000-0000-0000-0000-000000000002
-
 curl -i -X POST "$BASE_URL/files/complete" \
-  -H "Content-Type: application/json" \
-  -H "x-user-id: $OTHER_USER_ID" \
+  -H "content-type: application/json" \
+  -H "x-user-id: $USER_ID" \
+  -H "x-user-role: admin" \
   -d "{\"fileId\":\"$FILE_ID\"}"
 ```
 
-Expected: `403 Forbidden`
+Expected: HTTP/1.1 201 Created and body { "ok": true }
 
-## Expected HTTP status codes (edge cases)
+DB proof (status + integration)
 
-These are important for security + correctness:
+FileRecord is ready:
 
-- `POST /files/presign` without `x-user-id` → **401**
-- `POST /files/presign` as non-admin for `entityType=product` → **403**
-- `POST /files/complete` with чужий `fileId` → **403** (or **404** if you hide existence)
-- `POST /files/complete` for already-ready file → **409**
-- `GET /files/:id` without access → **403**/**404**
+```
+docker exec -i new_img psql -U postgres -d app -c \
+"select id, status, key, \"entityId\", \"ownerId\" from file_records where id='$FILE_ID';"
+docker exec -i new_img psql -U postgres -d app -c \
+"select id, \"imageFileId\" from products where id='$PRODUCT_ID';"
+```
 
-If you see **500**, check the global exception filter (`AllExceptionsFilter`) — it must preserve NestJS `HttpException` (401/403/404/409).
-
-### B) Non-admin cannot presign product image
-
-```bash
-curl -i -X POST "$BASE_URL/files/presign" \
-  -H "Content-Type: application/json" \
+Delivery URL (view)
+```
+URL_JSON=$(curl -sS "$BASE_URL/files/$FILE_ID" \
   -H "x-user-id: $USER_ID" \
-  -H "x-user-role: user" \
-  -d "{\"entityType\":\"product\",\"entityId\":\"$PRODUCT_ID\",\"contentType\":\"image/png\",\"size\":5,\"visibility\":\"public\"}"
+  -H "x-user-role: admin")
+
+echo "$URL_JSON"
+
+VIEW_URL=$(node -e "const fs=require('fs');const o=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(o.url || o.viewUrl || '')" <<<"$URL_JSON")
+echo "VIEW_URL=$VIEW_URL"
+
+curl -i "$VIEW_URL"
 ```
 
-Expected: `403 Forbidden`
+Expected:
+GET /files/:id returns { "url": "..." }
 
-## Expected HTTP status codes (edge cases)
+curl -i "$VIEW_URL" returns HTTP/1.1 200 OK
 
-These are important for security + correctness:
-
-- `POST /files/presign` without `x-user-id` → **401**
-- `POST /files/presign` as non-admin for `entityType=product` → **403**
-- `POST /files/complete` with чужий `fileId` → **403** (or **404** if you hide existence)
-- `POST /files/complete` for already-ready file → **409**
-- `GET /files/:id` without access → **403**/**404**
-
-If you see **500**, check the global exception filter (`AllExceptionsFilter`) — it must preserve NestJS `HttpException` (401/403/404/409).
-
-## Seed demo data
-```
-npm run seed
-```
-<img width="474" height="195" alt="image" src="https://github.com/user-attachments/assets/4226256d-5336-435e-b655-6281d398211b" />
-
-## Transactional createOrder
-```
-curl -i \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: test-key-1" \
-  -d "{
-    \"userId\":\"e74c8128-ec97-40ab-bc1c-7f420d541a2c\",
-    \"items\":[{\"productId\":\"b6106263-a610-4dc8-9be6-74f42a87ed4d\",\"quantity\":1}]
-  }" \
-  http://localhost:3000/orders
-```
-
-<img width="1601" height="486" alt="image" src="https://github.com/user-attachments/assets/443d82bc-e9fb-44bb-b6ee-8feebb094ba1" />
-
-
-## No partial writes
-
-Trigger a business error:
-
-<img width="407" height="108" alt="image" src="https://github.com/user-attachments/assets/64faea3b-7738-44aa-b0ce-496b4af3af53" />
-
-
-<img width="1645" height="276" alt="image" src="https://github.com/user-attachments/assets/06b74071-4346-4768-9208-d90807d3e212" />
-
-
-## Before / After
-
-SQL Optimization (Orders by status and date)
-Hot query
+Security / edge cases (negative tests)
+A) Another user cannot complete чужий файл (ownership)
+OTHER_USER_ID=22222222-2222-2222-2222-222222222222
 
 ```
-SELECT id, "userId", status, "createdAt"
-FROM orders
-WHERE status = 'created'
-  AND "createdAt" >= NOW() - interval '7 days'
-ORDER BY "createdAt" DESC
-LIMIT 50;
-```
-This query is used to fetch the latest created orders for admin views with filtering by status and creation date.
-
-Before optimization (no index)
-Execution plan highlights:
-PostgreSQL performed a Seq Scan on the orders table.
-Most rows were filtered out by status and createdAt conditions.
-An additional Sort (top-N heapsort) step was required for ORDER BY createdAt DESC.
-Execution time was around 10–12 ms with a large number of rows removed by filter.
-This approach does not scale well as the table grows.
-
-*Optimization*
-
-A partial index was added to match the query pattern:
-
-```
-CREATE INDEX idx_orders_created_createdat_desc
-ON orders ("createdAt" DESC)
-WHERE status = 'created';
+curl -i -X POST "$BASE_URL/files/complete" \
+  -H "content-type: application/json" \
+  -H "x-user-id: $OTHER_USER_ID" \
+  -H "x-user-role: admin" \
+  -d "{\"fileId\":\"$FILE_ID\"}"
 ```
 
-After optimization
-Execution plan highlights:
-PostgreSQL switched to an Index Scan using idx_orders_created_createdat_desc.
-Rows are returned already ordered, so no additional sort step is needed.
-Significantly fewer pages are read (Buffers: shared hit=50 read=2).
-Execution time dropped to approximately 0.33 ms.
+Expected: HTTP/1.1 403 Forbidden
 
-## Conclusion
-
-Before optimization, PostgreSQL scanned the entire orders table, filtered out most rows, and performed an extra sort operation.
-After introducing a partial index aligned with the WHERE and ORDER BY clauses, the planner was able to use an index scan and avoid sorting altogether.
-This reduced query execution time by more than an order of magnitude and significantly improved scalability.
-
-
----
-
-## Files (S3) homework: presigned upload flow
-
-### Env
-Copy `.env.example` -> `.env` and set:
-- `AWS_REGION`
-- `S3_BUCKET` (already set to `nodejs-homework-27`)
-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (local dev only)
-
-### API
-**DEV auth** is enabled for this homework (replace with JWT guard in production).
-Send headers:
-- `x-user-id: <uuid>`
-- `x-user-role: admin` (required for product image upload)
-
-Endpoints:
-- `POST /files/presign`
-- `PUT <uploadUrl>` (direct to S3)
-- `POST /files/complete`
-- `GET /files/:id` (returns view URL; public -> CloudFront/S3 URL, private -> presigned GET)
-
-### Example curl
-```bash
-# 1) presign
-curl -X POST http://localhost:3000/files/presign \
-  -H 'Content-Type: application/json' \
-  -H 'x-user-id: 00000000-0000-0000-0000-000000000001' \
-  -H 'x-user-role: admin' \
-  -d '{"entityType":"product","entityId":"<PRODUCT_ID>","contentType":"image/png","size":12345,"visibility":"public"}'
-
-# 2) upload to S3
-curl -X PUT '<uploadUrl>' -H 'Content-Type: image/png' --data-binary @./local.png
-
-# 3) complete
-curl -X POST http://localhost:3000/files/complete \
-  -H 'Content-Type: application/json' \
-  -H 'x-user-id: 00000000-0000-0000-0000-000000000001' \
-  -d '{"fileId":"<FILE_ID>"}'
+Repeat complete (already ready)
 ```
----
+curl -i -X POST "$BASE_URL/files/complete" \
+  -H "content-type: application/json" \
+  -H "x-user-id: $USER_ID" \
+  -H "x-user-role: admin" \
+  -d "{\"fileId\":\"$FILE_ID\"}"
+```  
 
-## Docker
+Expected: HTTP/1.1 409 Conflict (File is not pending)
 
-This repo supports:
+Expected status codes summary
+POST /files/presign without x-user-id -> 401
+POST /files/presign as non-admin for entityType=product -> 403
+PUT uploadUrl -> 200/204
+POST /files/complete чужий fileId -> 403 (or 404 if hiding existence)
+POST /files/complete already-ready -> 409
+GET /files/:id -> 200 with { url } and curl url -> 200
 
-- **prod-like** local run (API + Postgres) via `compose.yml`
-- **dev** run with hot reload & bind-mount via `compose.dev.yml`
-- multi-stage **Dockerfile targets**: `dev`, `build`, `prod`, `prod-distroless`
-- DB jobs as **one-off containers**: `migrate` and `seed`
 
-### Files added
-
-- `Dockerfile` — multi-stage build (dev/build/prod/prod-distroless)
-- `compose.yml` — prod-like stack (API + Postgres + jobs)
-- `compose.dev.yml` — dev override (hot reload + bind mount)
-- `.dockerignore` — excludes `node_modules`, `dist`, `.git`, `.env`, logs, etc.
-- `.env.example` — example env (no secrets)
-
-### 1) Setup env
-
-Create your local `.env` from `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-> `.env` must **not** be committed. It is ignored by `.dockerignore` and should be in `.gitignore`.
-
-### 2) Dev (hot reload)
-
-```bash
-docker compose -f compose.yml -f compose.dev.yml up --build
-```
-
-- API: http://localhost:${API_PORT:-8080}
-- Postgres: **not exposed** (no `ports:`), only available on the internal network.
-
-### 3) Prod-like local run
-
-```bash
-docker compose -f compose.yml up --build
-```
-
-### 4) Run DB jobs (one-off containers)
-
-Migrate (schema sync in this project):
-
-```bash
-docker compose -f compose.yml --profile jobs run --rm migrate
-```
-
-Seed:
-
-```bash
-docker compose -f compose.yml --profile jobs run --rm seed
-```
-
-### 5) Distroless proof (must start)
-
-Run distroless API variant (on **${API_DISTROLESS_PORT:-8081}**):
-
-```bash
-docker compose -f compose.yml --profile distroless up --build api-distroless
-```
-
-> Note: If your CI sets `COMPOSE_PROJECT_NAME`, Docker Compose requires it to be **lowercase**.
-
-### 6) Image size & history (proof of optimization)
-
-Build targets:
-
-```bash
-docker build --target dev -t ecommerce-api:dev .
-docker build --target prod -t ecommerce-api:prod .
-docker build --target prod-distroless -t ecommerce-api:prod-distroless .
-```
-
-Compare sizes:
-
-```bash
-docker image ls | grep ecommerce-api
-```
-
-Show layer history:
-
-```bash
-docker history ecommerce-api:prod
-docker history ecommerce-api:prod-distroless
-```
-
-**Expected outcome:** `prod-distroless` is smaller and has fewer tools (no shell/package manager), so the attack surface is lower.
-
-### 7) Non-root proof
-
-Prod (alpine) container runs as `node` user:
-
-```bash
-docker compose exec api id
-```
-
-Distroless has no shell; non-root is guaranteed by using the **`:nonroot`** distroless base.
-
-Hard proof (works without entering the container):
-
-```bash
-docker image inspect ecommerce-api:prod --format '{{.Config.User}}'
-docker image inspect ecommerce-api:prod-distroless --format '{{.Config.User}}'
-```
-
-Expected: `prod` -> `node`, `prod-distroless` -> non-root uid (e.g. `65532`).
