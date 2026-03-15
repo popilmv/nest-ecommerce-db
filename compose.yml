@@ -4,6 +4,7 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-app}
       POSTGRES_USER: ${DB_USER:-app}
+      # Intentionally no default in prod-like mode. Set DB_PASSWORD in .env.
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -93,18 +94,19 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
+      # Local-only defaults (profile: s3local). Override via .env if desired.
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio12345}
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data:/data    
+      - minio_data:/data
     profiles:
       - s3local
 volumes:
   pgdata:
-  minio_data: 
+
 networks:
   internal:
     internal: true

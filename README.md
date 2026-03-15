@@ -456,7 +456,24 @@ docker history ecommerce-api:prod
 docker history ecommerce-api:prod-distroless
 ```
 
-**Expected outcome:** `prod-distroless` is smaller and has fewer tools (no shell/package manager), so the attack surface is lower.
+Paste the **real output from your machine** into this section before submission.
+
+Example capture template:
+
+```text
+$ docker image ls | grep ecommerce-api
+<replace with real output>
+
+$ docker history ecommerce-api:prod
+<replace with real output>
+
+$ docker history ecommerce-api:prod-distroless
+<replace with real output>
+```
+
+Conclusion to include after pasting the output:
+- `prod` is smaller than `dev` because it ships only runtime artifacts (`dist/` + prod dependencies).
+- `prod-distroless` removes the shell and package manager, so the runtime image is smaller and has a lower attack surface.
 
 ### 7) Non-root proof
 
@@ -476,3 +493,45 @@ docker image inspect ecommerce-api:prod-distroless --format '{{.Config.User}}'
 ```
 
 Expected: `prod` -> `node`, `prod-distroless` -> non-root uid (e.g. `65532`).
+
+```
+docker build --target dev -t ecommerce-api:dev .
+```
+
+![alt text](image-1.png)
+
+```
+docker build --target prod -t ecommerce-api:prod .
+```
+![alt text](image-2.png)
+
+```
+docker build --target prod-distroless -t ecommerce-api:prod-distroless .
+```
+![alt text](image-3.png)
+
+```
+docker image ls | grep ecommerce-api
+```
+
+![alt text](image-4.png)
+
+```
+docker history ecommerce-api:prod
+```
+![alt text](image-6.png)
+
+```
+docker history ecommerce-api:dev
+```
+![alt text](image-8.png)
+
+
+```
+docker history ecommerce-api:prod-distroless
+```
+
+![alt text](image-7.png)
+
+
+

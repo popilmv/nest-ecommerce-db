@@ -12,7 +12,8 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  synchronize: false, 
+  synchronize: false,
   entities: [User, Product, Order, OrderItem],
+  migrations: ['dist/migrations/*.js'],
+  migrationsTableName: 'migrations_history',
 });
-

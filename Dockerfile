@@ -64,6 +64,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Distroless Node image has entrypoint "node" already.
+# Use the :nonroot variant to guarantee the process does not run as root.
+# Copy files with the nonroot uid/gid (65532) to avoid permission issues.
 COPY --chown=65532:65532 --from=build /app/dist ./dist
 COPY --chown=65532:65532 --from=build /app/node_modules ./node_modules
 COPY --chown=65532:65532 --from=build /app/package.json ./package.json
